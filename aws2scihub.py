@@ -12,9 +12,10 @@ import datetime
 import array
 import subprocess
 import errno
-from osgeo import gdal
-from osgeo import ogr
-from osgeo import osr
+import json
+
+
+
 from common_utils import raster_proc
 
 # This script prepares S2-L2 scenes  downloaded from AWS to be processed with 
@@ -92,7 +93,7 @@ def aws2schihub (scene_full_path):
     shutil.move(os.path.join(scene_full_path, 'R60m'), granule_path)
     
         
-    # renames band file for different resolutions 
+    # renames band files for different resolutions 
     prod_base = scene[38:44] + '_' + scene[11:26]
     for (dirpath, dirnames, filenames) in os.walk(granule_path):
         for f in filenames:
@@ -100,7 +101,7 @@ def aws2schihub (scene_full_path):
                 os.rename(os.path.join(dirpath,f),
                     os.path.join(dirpath, prod_base + '_' + f.replace('.jp2','_' + dirpath[-3:] + '.jp2')))
 
-    return true
+    return True
     
     
     
@@ -108,11 +109,11 @@ def aws2schihub (scene_full_path):
 def wait_for(max_proc, proc_in_work):
     while len(proc_in_work) >= max_proc :
         for proc in proc_in_work:
-            if (proc.poll()!=None) : 
+            if proc.poll() != None : 
                 proc_in_work.remove(proc)
                 return
         time.sleep(1)
-    return
+    return True
 
 
 
@@ -131,6 +132,7 @@ def convert2tiff (scene_full_path, max_proc = 1):
                 
     # we just loop through all files and
     # converts jp2 -> tif
+    proc_in_work = list()
     for (dirpath, dirnames, filenames) in os.walk(scene_full_path):
         #convert jp2 -> geotiff
         for f in filenames:
@@ -138,22 +140,26 @@ def convert2tiff (scene_full_path, max_proc = 1):
             
             for be in raster_band_endings:
                 if f.endswith(be): 
-                    if args.a and os.path.exists(os.path.join(new_dirpath,f).replace('.jp2','.tif')):
-                        break
                     wait_for(max_proc,proc_in_work)
-                    command = ('gdal_translate -of GTiff -co COMPRESS=LZW ' + os.path.join(dirpath,f) + ' ' + 
-                              os.path.join(new_dirpath,f).replace('.jp2','.tif'))
+                    command = f'gdal_translate -of GTiff -co COMPRESS=LZW  {os.path.join(dirpath,f)} {os.path.join(dirpath,f).replace(".jp2",".tif")}'
                     proc_in_work.append(subprocess.Popen(command,shell=True,stdout=subprocess.DEVNULL))
                     break
     wait_for(1,proc_in_work) # wait when all conversions are done
+    
+    # inexplicable error accidentally occurs 
+    # when we try further to delete .jp2 files 
+    # this sleep helps. Investigation is needed 
+    time.sleep(5) 
     
     # delete all .jp2 files
     for (dirpath, dirnames, filenames) in os.walk(scene_full_path):
         for f in filenames:
             if f.endswith('.jp2'):
-                os.remove(os.path.join(dirpath,f))
+                os.unlink(os.path.join(dirpath,f))
+                #os.remove(os.path.join(dirpath,f)) if os.path.exists(os.path.join(dirpath,f)) else print(os.path.join(dirpath,f))
+                
     
-    return true
+    return True
     
     
 #############################################     
@@ -173,11 +179,17 @@ if (len(sys.argv)==1):
 args = parser.parse_args()
 
 for scene in os.listdir(args.i):
+    if not scene.startswith('S2') or not os.path.isdir(os.path.join(args.i,scene)): continue
+    
+    print(scene, end = ' ... ')
+    sys.stdout.flush()
     if aws2schihub(os.path.join(args.i,scene)):
+        #time.sleep(5) # it's unclear behavior why this pause is needed before conversion block
         if convert2tiff(os.path.join(args.i,scene),args.p):
-            print(f'{scene} - DONE')
+            print('DONE', end='\n')
             continue
-    print(f'{scene} - ERROR')
+    print('ERROR', end = '\n')
+
 
 
      
