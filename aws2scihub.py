@@ -270,16 +270,13 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     
-    verify = True if args.vc is not None else False
-    
-  
     proc_in_work = list()
     max_proc = args.p
     
     for scene in os.listdir(args.i):
         if not scene.startswith('S2') or not os.path.isdir(os.path.join(args.i,scene)): continue
         wait_for(max_proc,proc_in_work)
-        proc_in_work.append( multiprocessing.Process(target=convert_single_scene, args=(os.path.join(args.i,scene), verify) ))
+        proc_in_work.append( multiprocessing.Process(target=convert_single_scene, args=(os.path.join(args.i,scene), args.vc) ))
         proc_in_work[-1].start()
         
     
