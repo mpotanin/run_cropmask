@@ -10,14 +10,21 @@ import shutil
 import time
 import datetime
 import array
-import subprocess
-import multiprocessing
 import errno
 import json
 from osgeo import gdal
 
+import subprocess
+import multiprocessing
+import multiprocessing, concurrent.futures
+from concurrent.futures import ProcessPoolExecutor
+
 
 from common_utils import raster_proc
+
+
+
+
 
 # This script prepares S2-L2 scenes  downloaded from AWS to be processed with 
 # sen2agri console utils. Two operations are fulfilled: 
@@ -106,25 +113,10 @@ def aws2schihub (scene_full_path):
     
     
     
-# sleep until running processes count greater or equal than max_proc    
-def wait_for(max_proc, proc_in_work):
-    
-    while len(proc_in_work) >= max_proc :
-        #print(len(proc_in_work))
-        for proc in proc_in_work:
-            proc.join(timeout=0)
-            if not proc.is_alive():
-                proc_in_work.remove(proc)
-        
-        time.sleep(1)
-    
-    return True
-
-
-
 # jp2 to tiff converter (using gdal_translate command line util)
 def convert2tiff (scene_full_path):
- 
+
+    #print(scene_full_path)
     scene = os.path.basename(scene_full_path)
     
     # forms list of rasters to convert (other rasters aren't converted),  
@@ -222,6 +214,7 @@ def verify_scene (scene_path):
 
 def convert_single_scene (scene_path, verify = False, max_attempt = 2):
     
+    
     if not verify: # simple case - just convert
         if aws2schihub(scene_path):
             if convert2tiff(scene_path): 
@@ -270,19 +263,15 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     
-    proc_in_work = list()
-    max_proc = args.p
+    #proc_in_work = list()
     
-    for scene in os.listdir(args.i):
-        if not scene.startswith('S2') or not os.path.isdir(os.path.join(args.i,scene)): continue
-        wait_for(max_proc,proc_in_work)
-        proc_in_work.append( multiprocessing.Process(target=convert_single_scene, args=(os.path.join(args.i,scene), args.vc) ))
-        proc_in_work[-1].start()
-        
+    with ProcessPoolExecutor(max_workers=args.p) as executor:
+        scene_task_list = list()
+        for scene in os.listdir(args.i):
+            if not scene.startswith('S2') or not os.path.isdir(os.path.join(args.i,scene)): continue
+            scene_task_list.append(executor.submit(convert_single_scene, os.path.join(args.i,scene), args.vc))
+        concurrent.futures.wait(scene_task_list)
     
-        
-    wait_for(1,proc_in_work)
-    exit(0)
-
+    
 
      
