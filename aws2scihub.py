@@ -11,9 +11,10 @@ import time
 import datetime
 import array
 import subprocess
+import multiprocessing
 import errno
 import json
-
+from osgeo import gdal
 
 
 from common_utils import raster_proc
@@ -107,18 +108,22 @@ def aws2schihub (scene_full_path):
     
 # sleep until running processes count greater or equal than max_proc    
 def wait_for(max_proc, proc_in_work):
+    
     while len(proc_in_work) >= max_proc :
+        #print(len(proc_in_work))
         for proc in proc_in_work:
-            if proc.poll() != None : 
+            proc.join(timeout=0)
+            if not proc.is_alive():
                 proc_in_work.remove(proc)
-                return
+        
         time.sleep(1)
+    
     return True
 
 
 
 # jp2 to tiff converter (using gdal_translate command line util)
-def convert2tiff (scene_full_path, max_proc = 1):
+def convert2tiff (scene_full_path):
  
     scene = os.path.basename(scene_full_path)
     
@@ -132,7 +137,7 @@ def convert2tiff (scene_full_path, max_proc = 1):
                 
     # we just loop through all files and
     # converts jp2 -> tif
-    proc_in_work = list()
+
     for (dirpath, dirnames, filenames) in os.walk(scene_full_path):
         #convert jp2 -> geotiff
         for f in filenames:
@@ -140,17 +145,11 @@ def convert2tiff (scene_full_path, max_proc = 1):
             
             for be in raster_band_endings:
                 if f.endswith(be): 
-                    wait_for(max_proc,proc_in_work)
                     command = f'gdal_translate -of GTiff -co COMPRESS=LZW  {os.path.join(dirpath,f)} {os.path.join(dirpath,f).replace(".jp2",".tif")}'
-                    proc_in_work.append(subprocess.Popen(command,shell=True,stdout=subprocess.DEVNULL))
+                    p = subprocess.Popen(command, shell=True, stdout=subprocess.DEVNULL)
+                    p.wait()
                     break
-    wait_for(1,proc_in_work) # wait when all conversions are done
-    
-    # inexplicable error accidentally occurs 
-    # when we try further to delete .jp2 files 
-    # this sleep helps. Investigation is needed 
-    time.sleep(5) 
-    
+ 
     # delete all .jp2 files
     for (dirpath, dirnames, filenames) in os.walk(scene_full_path):
         for f in filenames:
@@ -160,36 +159,133 @@ def convert2tiff (scene_full_path, max_proc = 1):
                 
     
     return True
+
+
+def try_read_band_as_array (file_band):
+    gdal_ds = gdal.Open(file_band)
+    gdal_band = gdal_ds.GetRasterBand(1)
+    band_array = gdal_band.ReadAsArray()
+    gdal_ds = None
+    gdal_band = None
     
+    return band_array
+    
+
+# verifies if a scene was correctly converted and stored on disk 
+# (this is needed if storage isn't reliably)
+
+def verify_scene (scene_path):
+    #print(scene_path)
+    if not os.path.exists(os.path.join(scene_path,'MTD_MSIL2A.xml')):
+        return False
+    
+    granule_path = os.path.join(scene_path,'GRANULE')
+    
+    if not os.path.exists(granule_path):
+        return False
+        
+    if len(os.listdir(granule_path)) != 1 :
+        return False
+        
+    
+    granule_path = os.path.join(granule_path, os.listdir(granule_path)[0])
+    
+    if not os.path.exists(os.path.join(granule_path,'MTD_TL.xml')) :
+        return False
+    
+   
+    res_list = ['10m','20m','60m']
+    check_list = {'10m':['B02','B03','B04','B08'],
+                  '20m':['B8A','SCL','B05','B06','B07','B11','B12'],
+                  '60m':['B01','B09']}
+    
+    for res in res_list:
+        base_path = os.path.join(granule_path,'IMG_DATA/R' + res)
+        for el in check_list[res] :
+            found_and_correct = False
+            for f in os.listdir(base_path):
+                if f.find(el + '_' + res) != -1:
+                    (srs,geotransform) = raster_proc.extract_georeference(os.path.join(base_path,f))
+                    if (srs is None) or (geotransform is None) :
+                        srs = None
+                        geotransform = None
+                        break
+                    #print(os.path.join(base_path,f))
+                    if try_read_band_as_array(os.path.join(base_path,f)) is not None :
+                        found_and_correct = True
+                    break
+                    
+            if not found_and_correct: return False    
+    return True
+
+
+
+def convert_single_scene (scene_path, verify = False, max_attempt = 2):
+    
+    if not verify: # simple case - just convert
+        if aws2schihub(scene_path):
+            if convert2tiff(scene_path): 
+                print(f'{os.path.basename(scene_path)}...DONE')
+                return True
+    else: # complecated case - assume there is not unreliable storage, we try several times to perform conversion
+        scene_path_temp = scene_path + '_TEMP'
+        shutil.copytree(scene_path,scene_path_temp)
+        for i in range(max_attempt):
+            try:
+                aws2schihub(scene_path_temp)
+                convert2tiff(scene_path_temp)
+                if verify_scene(scene_path_temp):
+                    shutil.rmtree(scene_path)
+                    os.rename(scene_path_temp,scene_path)
+                    print(f'{os.path.basename(scene_path)}...DONE')
+                    return True
+                else:
+                    raise Exception
+            except:
+                if os.path.exists(scene_path_temp): 
+                    shutil.rmtree(scene_path_temp)
+        
+    
+    print(f'{os.path.basename(scene_path)}...ERROR')    
+    return False
+ 
+
     
 #############################################     
 ########################## MAIN
 #############################################
 
+if __name__ == '__main__':
 
-parser = argparse.ArgumentParser(description='Converts scenes downloaded from AWS to SciHUB file names format')
-
-parser.add_argument('-i', required=True, metavar='input folder', help='Input folder with AWS L2A products')
-parser.add_argument('-p', required=False, type=int, metavar='processes num', help='num of parallel processes',default=1)
-
-if (len(sys.argv)==1):
-    parser.print_usage()
-    exit(0)
-
-args = parser.parse_args()
-
-for scene in os.listdir(args.i):
-    if not scene.startswith('S2') or not os.path.isdir(os.path.join(args.i,scene)): continue
+    parser = argparse.ArgumentParser(description='Converts scenes downloaded from AWS to SciHUB file names format')
     
-    print(scene, end = ' ... ')
-    sys.stdout.flush()
-    if aws2schihub(os.path.join(args.i,scene)):
-        #time.sleep(5) # it's unclear behavior why this pause is needed before conversion block
-        if convert2tiff(os.path.join(args.i,scene),args.p):
-            print('DONE', end='\n')
-            continue
-    print('ERROR', end = '\n')
+    parser.add_argument('-i', required=True, metavar='input folder', help='Input folder with AWS L2A products')
+    parser.add_argument('-vc', required=False, action='store_true', help= "Verify scene files after conversion (needed if storage isn't reliable)")
+    parser.add_argument('-p', required=False, type=int, metavar='processes num', help='num of parallel processes',default=1)
 
+    
+    if (len(sys.argv)==1):
+        parser.print_usage()
+        exit(0)
+    
+    args = parser.parse_args()
+    
+    verify = True if args.vc is not None else False
+    
+  
+    proc_in_work = list()
+    max_proc = args.p
+    
+    for scene in os.listdir(args.i):
+        if not scene.startswith('S2') or not os.path.isdir(os.path.join(args.i,scene)): continue
+        wait_for(max_proc,proc_in_work)
+        proc_in_work.append( multiprocessing.Process(target=convert_single_scene, args=(os.path.join(args.i,scene), verify) ))
+        proc_in_work[-1].start()
+        
+    
+        
+    wait_for(1,proc_in_work)
+    exit(0)
 
 
      
