@@ -254,7 +254,7 @@ if __name__ == '__main__':
     
     parser.add_argument('-i', required=True, metavar='input folder', help='Input folder with AWS L2A products')
     parser.add_argument('-vc', required=False, action='store_true', help= "Verify scene files after conversion (needed if storage isn't reliable)")
-    parser.add_argument('-p', required=False, type=int, metavar='processes num', help='num of parallel processes',default=1)
+    parser.add_argument('-p', required=False, metavar='processes num', help='num of parallel processes')
 
     
     if (len(sys.argv)==1):
@@ -263,9 +263,10 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     
-    #proc_in_work = list()
-    
-    with ProcessPoolExecutor(max_workers=args.p) as executor:
+
+    CPU_COUNT = multiprocessing.cpu_count()
+
+    with ProcessPoolExecutor(max_workers = 1 if args.p is None else eval(args.p)) as executor:
         scene_task_list = list()
         for scene in os.listdir(args.i):
             if not scene.startswith('S2') or not os.path.isdir(os.path.join(args.i,scene)): continue
