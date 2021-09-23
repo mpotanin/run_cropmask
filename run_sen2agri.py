@@ -26,10 +26,10 @@ def calc_processing_capacity_params (unique_tiles) :
     cpu_count = multiprocessing.cpu_count()
     ram_mb_total = virtual_memory().total // 2**20
     
-    tiles_proc = min(8, int(0.55*ram_mb_total) // 5000, unique_tiles)
+    tiles_proc = min(8, int(0.55*ram_mb_total) // 4000, unique_tiles)
     
     # (tiles in parallel, threads per tile, RAM mb per tile)
-    return ( tiles_proc, (cpu_count // tiles_proc) + 1, int(0.7 * ram_mb_total) // tiles_proc) 
+    return ( tiles_proc, (cpu_count // tiles_proc) + 1, int(0.55 * ram_mb_total) // tiles_proc) 
     
     
 
