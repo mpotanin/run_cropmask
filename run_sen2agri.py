@@ -19,6 +19,7 @@ import multiprocessing, concurrent.futures
 from concurrent.futures import ProcessPoolExecutor
 
 
+
 from common_utils import raster_proc
 
 # calc values: number of tiles processing in parallel, threads per tile, RAM mb per tile 
@@ -91,6 +92,11 @@ if len(scene_list)==0:
 resource.setrlimit(resource.RLIMIT_NOFILE, (500000, 500000)) # increase linux limit for simultaneously max opened files
 os.environ['OTB_MAX_RAM_HINT'] = str(tile_ram_mb)
 os.environ['GDAL_DATA'] = '/usr/share/gdal'
+os.environ['PROJ_LIB'] ='/home/ubuntu/OTB-7.1.0-Linux64/share/proj'
+os.environ['OTB_APPLICATION_PATH']='/home/ubuntu/OTB-7.1.0-Linux64/lib/otb/applications'
+os.environ['PATH']=os.environ['PATH'] + ':/home/ubuntu/OTB-7.1.0-Linux64/bin'
+
+
 os.chdir(sen2agri_script_path)
 
 input_scenes_str = '-input '
