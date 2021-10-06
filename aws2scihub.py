@@ -13,6 +13,7 @@ import array
 import errno
 import json
 from osgeo import gdal
+from enum import Enum
 
 import subprocess
 import multiprocessing
@@ -147,7 +148,6 @@ def convert2tiff (scene_full_path):
         for f in filenames:
             if f.endswith('.jp2'):
                 os.unlink(os.path.join(dirpath,f))
-                #os.remove(os.path.join(dirpath,f)) if os.path.exists(os.path.join(dirpath,f)) else print(os.path.join(dirpath,f))
                 
     
     return True
@@ -167,30 +167,22 @@ def try_read_band_as_array (file_band):
 # (this is needed if storage isn't reliably)
 
 def verify_scene (scene_path):
-    #print(scene_path)
-    if not os.path.exists(os.path.join(scene_path,'MTD_MSIL2A.xml')):
-        return False
+
+    if not os.path.exists(os.path.join(scene_path,'MTD_MSIL2A.xml')): return False
     
     granule_path = os.path.join(scene_path,'GRANULE')
-    
-    if not os.path.exists(granule_path):
-        return False
-        
-    if len(os.listdir(granule_path)) != 1 :
-        return False
+    if not os.path.exists(granule_path): return False
+    if len(os.listdir(granule_path)) != 1: return False
         
     
     granule_path = os.path.join(granule_path, os.listdir(granule_path)[0])
-    
-    if not os.path.exists(os.path.join(granule_path,'MTD_TL.xml')) :
-        return False
+    if not os.path.exists(os.path.join(granule_path,'MTD_TL.xml')) : return False
     
    
     res_list = ['10m','20m','60m']
     check_list = {'10m':['B02','B03','B04','B08'],
                   '20m':['B8A','SCL','B05','B06','B07','B11','B12'],
                   '60m':['B01','B09']}
-    
     for res in res_list:
         base_path = os.path.join(granule_path,'IMG_DATA/R' + res)
         for el in check_list[res] :
@@ -198,34 +190,45 @@ def verify_scene (scene_path):
             for f in os.listdir(base_path):
                 if f.find(el + '_' + res) != -1:
                     (srs,geotransform) = raster_proc.extract_georeference(os.path.join(base_path,f))
-                    if (srs is None) or (geotransform is None) :
-                        srs = None
-                        geotransform = None
-                        break
-                    #print(os.path.join(base_path,f))
-                    if try_read_band_as_array(os.path.join(base_path,f)) is not None :
+                    if (srs is None) or (geotransform is None) : return False
+                    elif try_read_band_as_array(os.path.join(base_path,f)) is None : return False
+                    else: 
                         found_and_correct = True
-                    break
+                        break
+                        
                     
             if not found_and_correct: return False    
+    
     return True
 
 
+class Skip(Enum):
+    none = 0
+    aws_to_scihub = 1
+    jp2_to_tif = 2
+    
 
-def convert_single_scene (scene_path, verify = False, max_attempt = 2):
+def convert_single_scene (scene_path, skip, verify = False, max_attempt = 2):
     
     
+    if skip != Skip.aws_to_scihub : aws2schihub(scene_path)
+    if skip == Skip.jp2_to_tif :
+        print(f'{os.path.basename(scene_path)}...DONE')
+        return True
+
+    #proceed with conversion .jp2 -> .tif    
     if not verify: # simple case - just convert
-        if aws2schihub(scene_path):
-            if convert2tiff(scene_path): 
-                print(f'{os.path.basename(scene_path)}...DONE')
-                return True
+        if convert2tiff(scene_path):
+            print(f'{os.path.basename(scene_path)}...DONE')
+            return True
+        else:
+            print(f'{os.path.basename(scene_path)}...ERROR')
+            return False
     else: # complecated case - assume there is not unreliable storage, we try several times to perform conversion
         scene_path_temp = scene_path + '_TEMP'
         shutil.copytree(scene_path,scene_path_temp)
         for i in range(max_attempt):
             try:
-                aws2schihub(scene_path_temp)
                 convert2tiff(scene_path_temp)
                 if verify_scene(scene_path_temp):
                     shutil.rmtree(scene_path)
@@ -234,6 +237,7 @@ def convert_single_scene (scene_path, verify = False, max_attempt = 2):
                     return True
                 else:
                     raise Exception
+
             except:
                 if os.path.exists(scene_path_temp): 
                     shutil.rmtree(scene_path_temp)
@@ -255,13 +259,18 @@ if __name__ == '__main__':
     parser.add_argument('-i', required=True, metavar='input folder', help='Input folder with AWS L2A products')
     parser.add_argument('-vc', required=False, action='store_true', help= "Verify scene files after conversion (needed if storage isn't reliable)")
     parser.add_argument('-p', required=False, metavar='processes num', help='num of parallel processes')
-
-    
+    parser.add_argument('-skip', required=False, metavar='aws_to_scihub | jp2_to_tif', help='skip conversion step: aws to scihub or .jp2 to .tif')
+        
     if (len(sys.argv)==1):
         parser.print_usage()
         exit(0)
     
     args = parser.parse_args()
+    
+    if args.skip is not None:
+        if args.skip not in Skip.__members__:
+            print(f'ERROR: not valid option value -skip. Valid values are: {[e.name for e in Skip]}')
+            exit(1)
     
 
     CPU_COUNT = multiprocessing.cpu_count()
@@ -270,7 +279,10 @@ if __name__ == '__main__':
         scene_task_list = list()
         for scene in os.listdir(args.i):
             if not scene.startswith('S2') or not os.path.isdir(os.path.join(args.i,scene)): continue
-            scene_task_list.append(executor.submit(convert_single_scene, os.path.join(args.i,scene), args.vc))
+            scene_task_list.append(executor.submit(convert_single_scene, 
+                                                  os.path.join(args.i,scene), 
+                                                  Skip.none if args.skip is None else Skip[args.skip], 
+                                                  args.vc))
         concurrent.futures.wait(scene_task_list)
     
     
