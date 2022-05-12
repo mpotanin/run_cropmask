@@ -69,6 +69,8 @@ parser.add_argument('-mtd', required=False, metavar='maximum tree depth', type=i
                     help='Maximum depth of the trees used for Random Forest classifier')
 parser.add_argument('-ratio', required=False, metavar='ratio', type=float, default=0.75, 
                     help='The ratio between training and validation polygons') 
+parser.add_argument('-rseed', required=False, metavar='random seed', type=int, default=0, 
+                    help='Random seed is used to initialize the random number generator') 
 
 
 if (len(sys.argv)==1):
@@ -78,7 +80,7 @@ if (len(sys.argv)==1):
 args = parser.parse_args()
 
 sen2agri_script_path = '/home/ubuntu/sen2agri-processors_new/scripts/'
-sen2agri_run_script_base = ('python /home/ubuntu/sen2agri-processors_new/scripts/CropMaskFused.py -skip-segmentation -no-red-edge -nbtrsample 500000 -classifier rf -rseed 0 -pixsize 10 -rfmin 25 -window 6 -lmbd 2 -eroderad 1 -alpha 0.01 -nbcomp 6 -spatialr 10 -ranger 0.65 -minsize 10 -minarea 20 -main-mission-segmentation SENTINEL -lut /home/ubuntu/dev/run_cropmask/crop-mask.lut')
+sen2agri_run_script_base = ('python /home/ubuntu/sen2agri-processors_new/scripts/CropMaskFused.py -skip-segmentation -no-red-edge -nbtrsample 500000 -classifier rf -pixsize 10 -rfmin 25 -window 6 -lmbd 2 -eroderad 1 -alpha 0.01 -nbcomp 6 -spatialr 10 -ranger 0.65 -minsize 10 -minarea 20 -main-mission-segmentation SENTINEL -lut /home/ubuntu/dev/run_cropmask/crop-mask.lut')
 
 
 scene_list = create_scene_path_list(args.i)
@@ -104,7 +106,7 @@ for scene in scene_list:
     input_scenes_str+=scene + ' '
 
 cmd = f'{sen2agri_run_script_base} -ratio {args.ratio} -rfnbtrees {args.ntrees} -rfmax {args.mtd} -max-parallelism {tile_proc} '
-cmd +=f'-tile-threads-hint {tile_threads} -refp {args.refp} -outdir {args.o} '
+cmd +=f'-tile-threads-hint {tile_threads} -refp {args.refp} -outdir {args.o} -rseed {args.rseed}'
 cmd +=f'-targetfolder {os.path.join(args.o,"formatted")} -outprops {os.path.join(args.o,"product_properties.txt")} {input_scenes_str}'
 #print((tile_proc, tile_threads, tile_ram_mb))
 print(cmd)
