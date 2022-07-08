@@ -106,7 +106,7 @@ for scene in scene_list:
     input_scenes_str+=scene + ' '
 
 cmd = f'{sen2agri_run_script_base} -ratio {args.ratio} -rfnbtrees {args.ntrees} -rfmax {args.mtd} -max-parallelism {tile_proc} '
-cmd +=f'-tile-threads-hint {tile_threads} -refp {args.refp} -outdir {args.o} -rseed {args.rseed}'
+cmd +=f'-tile-threads-hint {tile_threads} -refp {args.refp} -outdir {args.o} -rseed {args.rseed} '
 cmd +=f'-targetfolder {os.path.join(args.o,"formatted")} -outprops {os.path.join(args.o,"product_properties.txt")} {input_scenes_str}'
 #print((tile_proc, tile_threads, tile_ram_mb))
 print(cmd)
